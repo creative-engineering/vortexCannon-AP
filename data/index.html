@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script src="jquery.min.js"></script>
+
+    <script src="knob.js"></script>
+    <link rel="stylesheet" type="text/css" href="bootstrap.css">
+</head>
+
+<body>
+
+    <style>
+        body,
+        html {
+            height: 100%;
+            margin: 0;
+            background-color: #292929;
+        }
+
+        .overlay {
+            height: 0%;
+            width: 100%;
+            position: fixed;
+            z-index: 1000;
+            color: white;
+            top: 0;
+            left: 0;
+            background-color: rgba(0, 0, 0, 0.952);
+            overflow-y: hidden;
+            transition: 0.5s;
+        }
+
+        .overlay-content {
+            position: relative;
+            top: 25%;
+            width: 100%;
+            text-align: center;
+            margin-top: 30px;
+        }
+
+        @media screen and (max-height: 450px) {
+            .overlay {
+                overflow-y: auto;
+            }
+            .btn {
+                position: relative;
+            }
+        }
+
+
+        .dial {
+            position: absolute;
+            z-index: 100;
+        }
+
+        .buttonContainer {
+            margin: auto;
+            width: 50%;
+        }
+
+        .btn {
+            z-index: 100;
+            position: absolute;
+            right: 41%;
+            margin-top: 2%;
+
+        }
+
+        #counterBlock {
+            position: absolute;
+            left: 47.5%;
+            visibility: hidden;
+            text-align: center;
+            font-size: 450%;
+            color: white;
+        }
+
+        #status {
+            text-align: center;
+            color: red;
+            font-size: 220%;
+            letter-spacing: 2px;
+
+            padding-top: 1%;
+            padding: 1%;
+        }
+
+    </style>
+
+    <br><br><br><br><br><br>
+
+    <center>
+        <input type="text" class="dial dialRed" value="75" data-displayPrevious=true data-fgColor="red" data-thickness=.5
+            value="29">
+        <input type="text" class="dial dialGreen" value="50" data-displayPrevious=true data-fgColor="green"
+            data-thickness=.5 value="29">
+        <input type="text" class="dial dialBlue" value="25" data-displayPrevious=true data-fgColor="blue"
+            data-thickness=.5 value="29">
+    </center>
+
+    <br><br><br>
+
+    <div class="buttonContainer">
+        <div id="status">@</div>
+        <button onclick="openLayer()" type="button" id="button" class="btn btn-primary btn-lg">FIRE CANNON!</button>
+    </div>
+
+    <canvas id="wheelCanvas" onclick="getColor(event)"></canvas>
+
+    <div id="myNav" class="overlay">
+        <div class="overlay-content">
+            <div>
+                <h2>cannon will fire in:</h2>
+            </div>
+            <div id="counterBlock">15</div>
+        </div>
+    </div>
+
+    <script>
+
+        var count = 15;
+        var time;
+        var buttonState = 0;
+        var statusData;
+
+        $(".dialRed").knob({
+            'change': function (v) {
+                console.log("red: " + Math.round(v, 0));
+                $.ajax({
+                    url: "/setPWM/setLED?R=" + Math.round(v, 0), success: function (result) {
+                        // $("#divRed").html(result); //#div1
+                    }
+                });
+            }
+        });
+
+        $(".dialGreen").knob({
+            'change': function (v) {
+                console.log("green: " + Math.round(v, 0));
+                $.ajax({
+                    url: "/setPWM/setLED?G=" + Math.round(v, 0), success: function (result) {
+                        // $("#divGreen").html(result);
+                    }
+                });
+            }
+        });
+
+        $(".dialBlue").knob({
+            'change': function (v) {
+                console.log(Math.round(v, 0));
+                $.ajax({
+                    url: "/setPWM/setLED?B=" + Math.round(v, 0), success: function (result) {
+                        // $("#divBlue").html(result);
+                    }
+                });
+            }
+        });
+
+        function buttonSend(state) {
+            console.log("state: " + state)
+            $.ajax({
+                url: "/buttonSet?state=" + state, success: function (result) {
+                    // $("#divBut").html(result);
+                }
+            });
+        }
+
+        function openLayer() {
+            buttonState = 1;
+            buttonSend(buttonState);
+
+            document.getElementById("myNav").style.height = "100%";
+            document.getElementById("counterBlock").style.visibility = "visible";
+            time = setInterval(countdown, 1000);
+        }
+
+        function closeLayer() {
+            document.getElementById("myNav").style.height = "0%";
+        }
+
+        function countdown() {
+            var x = document.getElementById("counterBlock");
+            console.log(count)
+            x.innerHTML = count;
+
+            if (count == 1) { console.log("BANG"); }
+
+            if (count == 0) {
+                closeLayer();
+                clearInterval(time);
+
+                count = 15; //reset counter
+                x.innerHTML = count;
+                buttonState = 0;
+
+                buttonSend(buttonState);
+            }
+            count--;
+        }
+
+        function loadDoc() {
+
+            var xhttp = new XMLHttpRequest(); xhttp.onreadystatechange = function () {
+                if (this.readyState == 4 && this.status == 200) {
+                    var obj = JSON.parse(this.responseText);
+
+                    statusData = obj.data[0].dataValue;
+                    document.getElementById("status").innerHTML = statusData;
+
+                    if (statusData == "-- IN USE, PLEASE WAIT... --") {
+                        $("#button").fadeOut(1000);
+                    }
+                    else if (statusData == "-- HEATING SMOKE MACHINE, PLEASE WAIT... --") {
+                        $("#button").fadeOut(1000);
+                    }
+                    else {
+                        $("#button").fadeIn(1000);
+                    }
+                }
+            };
+            xhttp.open("GET", "/data", true); xhttp.send();
+        }
+        var timedEvent = setInterval(function () { loadDoc(); }, 200);
+
+    </script>
+</body>
+
+</html>
