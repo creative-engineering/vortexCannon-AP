@@ -43,8 +43,12 @@ String status = "-- WAITING FOR INPUT... --";
 byte btn;
 byte toggl = 0;
 
+bool pushToggl = 0;
+bool fireToggl = 0;
 bool toggleVar = 1;
 bool LEDtoggl = 0;
+
+int fireCounter = 0;
 
 int globalR;
 int globalG;
@@ -55,7 +59,7 @@ int globalB;
 #define GPIO26 26
 #define GPIO27 27
 
-#define GPIO32 32 //button
+#define GPIO14 14 //button
 
 int LEDfreq = 1400;
 int resolution = 8;   // 8 bit res. (0-255)
@@ -68,9 +72,15 @@ byte ledChannel4 = 4;
 unsigned int rgbColour[3];
 
 // Start off with red.
-rgbColour[0] = 255;
-rgbColour[1] = 0;
-rgbColour[2] = 0;
+//rgbColour[0] = 255;
+//rgbColour[1] = 0;
+//rgbColour[2] = 0;
+
+int wheelCounter = 0;
+int WheelPos;
+
+int colorCounter = 0;
+int pushCounter = 0;
 
 
 float brightness = 0;    // how bright the LED is
@@ -121,12 +131,10 @@ void handleRainbow() {
   if (toggl && toggleVar) {
     LEDtoggl = 1;
     toggleVar = 0;
-    Serial.println("wassss here");
   }
   else if (toggl && !toggleVar)  {
     LEDtoggl = 0;
     toggleVar = 1;
-    Serial.println("wassss here toooo");
   }
 
   server.send(200, "text/plane", "");
@@ -220,30 +228,64 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
   }
 }
 
-void colorWheel() {
+uint32_t Wheel() {
 
-  // Choose the colours to increment and decrement.
-  for (int decColour = 0; decColour < 3; decColour += 1) {
-    int incColour = decColour == 2 ? 0 : decColour + 1;
+  colorCounter++;
 
-    // cross-fade the two colours.
-    for (int i = 0; i < 255; i += 1) {
-      rgbColour[decColour] -= 1;
-      rgbColour[incColour] += 1;
-
-      globalR = rgbColour[0];
-      globalG = rgbColour[1];
-      globalB = rgbColour[2];
-
-      Serial.print("globalR: "); Serial.println(globalR);
-      Serial.print("globalG: "); Serial.println(globalG);
-      Serial.print("globalB: "); Serial.println(globalB);
-
-      ledcWrite(ledChannel1, globalR);
-      ledcWrite(ledChannel2, globalG);
-      ledcWrite(ledChannel3, globalB);
-    }
+  if (colorCounter > 0 && colorCounter < 255) {
+    globalR++;
+    globalB--;
   }
+  if (colorCounter > 255 && colorCounter < 255 * 2) {
+    globalR--;
+    globalG++;
+  }
+  if (colorCounter > 255 * 2 && colorCounter < 255 * 3) {
+    globalG--;
+    globalB++;
+  }
+  if (colorCounter == 255 * 3) {
+    colorCounter = 0;
+  }
+
+  if (globalR < 0) {
+    globalR = 0;
+  }
+  if (globalG < 0) {
+    globalG = 0;
+  }
+  if (globalB < 0) {
+    globalB = 0;
+  }
+
+}
+
+void fireCannon() {
+
+  Serial.print("fireCounter: ");Serial.println(fireCounter);;
+
+  if (fireCounter == 1) {
+    digitalWrite(17, LOW);
+    Serial.print("1");
+  }
+  else if ( fireCounter == 400) {
+    digitalWrite(17, HIGH);
+    Serial.print("2");
+  }
+  else if ( fireCounter == 1000) {
+    digitalWrite(16, LOW);
+    Serial.print("3");
+  }
+  else if ( fireCounter == 1100 ) {
+    digitalWrite(16, HIGH);
+    Serial.print("4");
+    status == "-- READY TO FIRE --";
+    fireCounter = 0;
+    btn = 0;
+    fireToggl = LOW;
+  }
+  radyCounter = 0;
+  fireCounter++;
 }
 
 
@@ -273,54 +315,104 @@ void loop() {} //not really useful but has to be there!
 
 void GPIOtask( void * parameter )
 {
-  pinMode(33, INPUT); //used to check smokemachine
-  pinMode(12, INPUT_PULLUP); //Button
-  pinMode(23, OUTPUT); //Soleniod
-  pinMode(22, OUTPUT); //Smoke
+  pinMode(4, INPUT); //used to check smokemachine
+  pinMode(33, INPUT_PULLUP); //Button
+  pinMode(17, OUTPUT); //Soleniod
+  pinMode(16, OUTPUT); //Smoke
 
-  digitalWrite(23, HIGH);
-  digitalWrite(22, HIGH);
+  digitalWrite(16, HIGH);
+  digitalWrite(17, HIGH);
+
+  ledcSetup(ledChannel1, LEDfreq, resolution); //RED
+  ledcAttachPin(GPIO27, ledChannel1);
+
+  ledcSetup(ledChannel2, LEDfreq, resolution); //GREEN
+  ledcAttachPin(GPIO26, ledChannel2);
+
+  ledcSetup(ledChannel3, LEDfreq, resolution); //BLUE
+  ledcAttachPin(GPIO25, ledChannel3);
 
   ledcSetup(ledChannel4, LEDfreq, resolution); //Button
-  ledcAttachPin(GPIO32, ledChannel4);
+  ledcAttachPin(GPIO14, ledChannel4);
 
   for (;;) {
 
-    if (!digitalRead(12) or btn) {
+    Serial.print("kanp: "); Serial.println(digitalRead(33));
+
+    if (!digitalRead(33) or btn) {
+      fireToggl = HIGH;
+      status = "-- IN USE, PLEASE WAIT... --";
+      Serial.println(status);
+
+    }
+
+    if (fireToggl) {
       fireCannon();
     }
 
-    if (!digitalRead(33)) {
-      status = "-- HEATING SMOKE MACHINE, PLEASE WAIT... --";
-      //status = "-- READY TO FIRE --";
-      ledcWrite(ledChannel4, 0); //button
-      //Serial.println(status);
-      radyCounter = 0;
-      //delay(20000);
-    }
-    else if (digitalRead(33)) {
-      //Serial.println(status);
-      radyCounter++;
-    }
+    if (!fireToggl) {
 
-    //Serial.print("radyCounter: "); Serial.println(radyCounter);
-
-    if (radyCounter >= 250) {
-      status = "-- READY TO FIRE --";
-      radyCounter = 0;
-    }
-
-    if (status == "-- READY TO FIRE --") {
-
-      brightness = brightness + fadeAmount;
-
-      if (brightness <= 0 || brightness >= 255) {
-        fadeAmount = -fadeAmount;
+      if (!digitalRead(4)) {
+        status = "-- HEATING SMOKE MACHINE, PLEASE WAIT... --";
+        ledcWrite(ledChannel4, 0); //button
+        Serial.println(status);
+        radyCounter = 0;
       }
-      ledcWrite(ledChannel4, brightness); //button
+      if (digitalRead(4)) {
+        if (radyCounter > 500) {
+          status = "-- READY TO FIRE --";
+          Serial.println(status);
+          radyCounter = 0;
+        }
+
+        Serial.print("radyCounter: "); Serial.println(radyCounter);
+        radyCounter++;
+      }
+
+
+      if (status == "-- READY TO FIRE --") {
+        Serial.println(status);
+        brightness = brightness + fadeAmount;
+
+        if (brightness <= 0 || brightness >= 255) {
+          fadeAmount = -fadeAmount;
+        }
+        ledcWrite(ledChannel4, brightness); //button
+      }
+      else if (status == "-- HEATING SMOKE MACHINE, PLEASE WAIT... --" or status == "-- IN USE, PLEASE WAIT... --" ) {
+        ledcWrite(ledChannel4, 0); //button
+      }
+
     }
-    else {
-      ledcWrite(ledChannel4, 0); //button
+
+    if (LEDtoggl) {
+
+      if (wheelCounter == 1) { //auto control (rainbow)
+
+        Wheel();
+
+        ledcWrite(ledChannel1, globalR);
+        ledcWrite(ledChannel2, globalG);
+        ledcWrite(ledChannel3, globalB);
+
+        // Serial.print("globalR: "); Serial.println(globalR);
+        // Serial.print("globalG: "); Serial.println(globalG);
+        // Serial.print("globalB: "); Serial.println(globalB);
+
+        wheelCounter = 0;
+      }
+      wheelCounter++;
+    }
+
+    else if (!LEDtoggl) { //manual control (dials)
+
+      ledcWrite(ledChannel1, globalR);
+      ledcWrite(ledChannel2, globalG);
+      ledcWrite(ledChannel3, globalB);
+
+      // Serial.print("globalR: "); Serial.println(globalR);
+      // Serial.print("globalG: "); Serial.println(globalG);
+      // Serial.print("globalB: "); Serial.println(globalB);
     }
 
     micros(); //update overflow
@@ -362,58 +454,8 @@ void APtask( void * parameter )
   Serial.print("IP address: ");
   Serial.println(apIP);
 
-  ledcSetup(ledChannel1, LEDfreq, resolution); //RED
-  ledcAttachPin(GPIO27, ledChannel1);
-
-  ledcSetup(ledChannel2, LEDfreq, resolution); //GREEN
-  ledcAttachPin(GPIO26, ledChannel2);
-
-  ledcSetup(ledChannel3, LEDfreq, resolution); //BLUE
-  ledcAttachPin(GPIO25, ledChannel3);
-
   for (;;) {
-
     dnsServer.processNextRequest();
     server.handleClient();
-
-    if (LEDtoggl) {
-
-      if (colorWheelCounter >= 25) {
-        colorWheel();
-        colorWheelCounter = 0;
-      }
-
-      colorWheelCounter++;
-    }
-
-    else if (!LEDtoggl) {
-
-      ledcWrite(ledChannel1, globalR);
-      ledcWrite(ledChannel2, globalG);
-      ledcWrite(ledChannel3, globalB);
-
-      Serial.print("globalR: "); Serial.println(globalR);
-      Serial.print("globalG: "); Serial.println(globalG);
-      Serial.print("globalB: "); Serial.println(globalB);
-
-    }
   }
-}
-
-void fireCannon() {
-
-  status = "-- IN USE, PLEASE WAIT... --";
-
-  digitalWrite(22, LOW);
-  delay(4000);
-  digitalWrite(22, HIGH);
-  delay(4000);
-  digitalWrite(23, LOW);
-  delay(1000);
-  digitalWrite(23, HIGH);
-  delay(500);
-
-  radyCounter = 0;
-  btn = 0;
-
 }
