@@ -3,7 +3,6 @@
 
 <head>
     <script src="jquery.min.js"></script>
-
     <script src="knob.js"></script>
     <link rel="stylesheet" type="text/css" href="bootstrap.css">
 </head>
@@ -86,6 +85,62 @@
             padding: 1%;
         }
 
+        .switch {
+  position: relative;
+  display: inline-block;
+  width: 60px;
+  height: 34px;
+}
+
+.switch input {display:none;}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px #2196F3;
+}
+
+input:checked + .slider:before {
+  -webkit-transform: translateX(26px);
+  -ms-transform: translateX(26px);
+  transform: translateX(26px);
+}
+
+/* Rounded sliders */
+.slider.round {
+  border-radius: 34px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+
     </style>
 
     <br><br><br><br><br><br>
@@ -104,22 +159,29 @@
     <div class="buttonContainer">
         <div id="status">@</div>
         <button onclick="openLayer()" type="button" id="button" class="btn btn-primary btn-lg">FIRE CANNON!</button>
-    </div>
 
-    <canvas id="wheelCanvas" onclick="getColor(event)"></canvas>
+
+        <label class="switch">
+            <input type="checkbox">
+            <span class="slider round"></span>
+        </label>
+
+
+    </div>
 
     <div id="myNav" class="overlay">
         <div class="overlay-content">
             <div>
                 <h2>cannon will fire in:</h2>
             </div>
-            <div id="counterBlock">15</div>
+            <div id="counterBlock">10</div>
         </div>
     </div>
 
     <script>
 
-        var count = 15;
+        var togglCounter = 0;
+        var count = 10;
         var time;
         var buttonState = 0;
         var statusData;
@@ -166,6 +228,19 @@
             });
         }
 
+        $(".switch").click(function () {
+            togglCounter++;
+            var state = 1;
+            if (togglCounter == 2) {
+                console.log("LEDtogglBtn: " + state)
+                $.ajax({
+                    url: "/LEDtoggl?state=" + state, success: function (result) {
+                    }
+                });
+                togglCounter = 0;
+            }
+        });
+
         function openLayer() {
             buttonState = 1;
             buttonSend(buttonState);
@@ -190,7 +265,7 @@
                 closeLayer();
                 clearInterval(time);
 
-                count = 15; //reset counter
+                count = 10; //reset counter
                 x.innerHTML = count;
                 buttonState = 0;
 
@@ -207,6 +282,7 @@
 
                     statusData = obj.data[0].dataValue;
                     document.getElementById("status").innerHTML = statusData;
+                    console.log(statusData);
 
                     if (statusData == "-- IN USE, PLEASE WAIT... --") {
                         $("#button").fadeOut(1000);

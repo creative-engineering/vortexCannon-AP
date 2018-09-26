@@ -1,5 +1,4 @@
 
-#include <ArduinoJson.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WebServer.h>
@@ -8,6 +7,24 @@
 #include <FS.h>
 #include <DNSServer.h>
 #include <WebSocketsServer.h>
+#include <esp_task_wdt.h>
+#include <esp_int_wdt.h>
+
+/*
+  ----------------  PIN SETUP ----------------
+    OUTPUTS:
+    Smoke machine:  GPI22
+    Solenoid:       GPI23
+    LED R:          GPI27
+    LED G:          GPI26
+    LED B:          GPI25
+    LED Btn:        GPI32
+
+    INPUTS:
+    Btn:            GPI12
+    Smoke sensor:   GPI33
+  -------------------------------------------
+*/
 
 const byte DNS_PORT = 53;
 IPAddress apIP(192, 168, 1, 1);
@@ -21,16 +38,24 @@ TaskHandle_t xTask2;
 const char* htmlfile = "/index.html";
 const char* host = "esp32fs";
 
-String status = "WAITING FOR INPUT...";
+String status = "-- WAITING FOR INPUT... --";
 
-int gobalR;
-int gobalG;
-int gobalB;
+byte btn;
+byte toggl = 0;
+
+bool toggleVar = 1;
+bool LEDtoggl = 0;
+
+int globalR;
+int globalG;
+int globalB;
 
 //------------ VALUES FOR LED PWM -------------//
-#define GPIO13 13
-#define GPIO12 12
-#define GPIO14 14
+#define GPIO25 25
+#define GPIO26 26
+#define GPIO27 27
+
+#define GPIO32 32 //button
 
 int LEDfreq = 1400;
 int resolution = 8;   // 8 bit res. (0-255)
@@ -38,6 +63,20 @@ int resolution = 8;   // 8 bit res. (0-255)
 byte ledChannel1 = 1;
 byte ledChannel2 = 2;
 byte ledChannel3 = 3;
+byte ledChannel4 = 4;
+
+unsigned int rgbColour[3];
+
+// Start off with red.
+rgbColour[0] = 255;
+rgbColour[1] = 0;
+rgbColour[2] = 0;
+
+
+float brightness = 0;    // how bright the LED is
+int fadeAmount = 1;    // how many points to fade the LED by
+int radyCounter = 0;
+int colorWheelCounter = 0;
 
 //holds the current upload
 File fsUploadFile;
@@ -68,19 +107,28 @@ bool loadFromSpiffs(String path) {
 }
 
 void handleButton() {
-
   String state = server.arg("state");
-  int btn = state.toInt();
-  Serial.print("Button: ");
-  Serial.println(btn);
+  btn = state.toInt();
+  Serial.print("Button: "); Serial.println(btn);
 
-  if (btn == 1) {
-    status = "-- IN USE, PLEASE WAIT... --";
+  server.send(200, "text/plane", "");
+}
+void handleRainbow() {
+  String state = server.arg("state");
+  toggl = state.toInt();
+  Serial.print("toggl: "); Serial.println(btn);
+
+  if (toggl && toggleVar) {
+    LEDtoggl = 1;
+    toggleVar = 0;
+    Serial.println("wassss here");
   }
-  else {
-    status = "-- READY TO FIRE --";
+  else if (toggl && !toggleVar)  {
+    LEDtoggl = 0;
+    toggleVar = 1;
+    Serial.println("wassss here toooo");
   }
-  Serial.println(status);
+
   server.send(200, "text/plane", "");
 }
 
@@ -95,24 +143,19 @@ void handlePWM() {
   int B = Blue.toInt();
 
   if (R != 0) {
-    gobalR = R;
+    globalR = R;
   }
   if (G != 0) {
-    gobalG = G;
+    globalG = G;
   }
   if (B != 0) {
-    gobalB = B;
+    globalB = B;
   }
   server.send(200, "text/plane", "");
 }
 
 void handleRoot() {
   server.sendHeader("Location", "/index.html", true);  //Redirect to our html web page
-  server.send(302, "text/plane", "");
-}
-
-void handleImg() {
-  server.sendHeader("Location", "/wheel.png", true);
   server.send(302, "text/plane", "");
 }
 
@@ -177,10 +220,36 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
   }
 }
 
+void colorWheel() {
+
+  // Choose the colours to increment and decrement.
+  for (int decColour = 0; decColour < 3; decColour += 1) {
+    int incColour = decColour == 2 ? 0 : decColour + 1;
+
+    // cross-fade the two colours.
+    for (int i = 0; i < 255; i += 1) {
+      rgbColour[decColour] -= 1;
+      rgbColour[incColour] += 1;
+
+      globalR = rgbColour[0];
+      globalG = rgbColour[1];
+      globalB = rgbColour[2];
+
+      Serial.print("globalR: "); Serial.println(globalR);
+      Serial.print("globalG: "); Serial.println(globalG);
+      Serial.print("globalB: "); Serial.println(globalB);
+
+      ledcWrite(ledChannel1, globalR);
+      ledcWrite(ledChannel2, globalG);
+      ledcWrite(ledChannel3, globalB);
+    }
+  }
+}
+
+
 void setup() {
 
   Serial.begin(112500);
-  pinMode(15, INPUT); //used to check smokemachine
 
   xTaskCreatePinnedToCore(
     GPIOtask,           /* Task function. */
@@ -204,37 +273,55 @@ void loop() {} //not really useful but has to be there!
 
 void GPIOtask( void * parameter )
 {
+  pinMode(33, INPUT); //used to check smokemachine
+  pinMode(12, INPUT_PULLUP); //Button
+  pinMode(23, OUTPUT); //Soleniod
+  pinMode(22, OUTPUT); //Smoke
 
-  ledcSetup(ledChannel1, LEDfreq, resolution); //RED
-  ledcAttachPin(GPIO13, ledChannel1);
+  digitalWrite(23, HIGH);
+  digitalWrite(22, HIGH);
 
-  ledcSetup(ledChannel2, LEDfreq, resolution); //GREEN
-  ledcAttachPin(GPIO12, ledChannel2);
-
-  ledcSetup(ledChannel3, LEDfreq, resolution); //BLUE
-  ledcAttachPin(GPIO14, ledChannel3);
-
-  bool flag = HIGH;
+  ledcSetup(ledChannel4, LEDfreq, resolution); //Button
+  ledcAttachPin(GPIO32, ledChannel4);
 
   for (;;) {
-    //Serial.print("R: "); Serial.println(gobalR);
-    //Serial.print("G: "); Serial.println(gobalG);
-    //Serial.print("B: "); Serial.println(gobalB);
 
-    if (!digitalRead(15) && flag == HIGH) {
+    if (!digitalRead(12) or btn) {
+      fireCannon();
+    }
+
+    if (!digitalRead(33)) {
       status = "-- HEATING SMOKE MACHINE, PLEASE WAIT... --";
-      flag = LOW;
-      Serial.println(status);
+      //status = "-- READY TO FIRE --";
+      ledcWrite(ledChannel4, 0); //button
+      //Serial.println(status);
+      radyCounter = 0;
+      //delay(20000);
     }
-    else if (digitalRead(15) && flag == LOW) {
-      status = "-- READY TO FIRE --";
-      flag = HIGH;
-      Serial.println(status);
+    else if (digitalRead(33)) {
+      //Serial.println(status);
+      radyCounter++;
     }
 
-    ledcWrite(ledChannel1, gobalR);
-    ledcWrite(ledChannel2, gobalG);
-    ledcWrite(ledChannel3, gobalB);
+    //Serial.print("radyCounter: "); Serial.println(radyCounter);
+
+    if (radyCounter >= 250) {
+      status = "-- READY TO FIRE --";
+      radyCounter = 0;
+    }
+
+    if (status == "-- READY TO FIRE --") {
+
+      brightness = brightness + fadeAmount;
+
+      if (brightness <= 0 || brightness >= 255) {
+        fadeAmount = -fadeAmount;
+      }
+      ledcWrite(ledChannel4, brightness); //button
+    }
+    else {
+      ledcWrite(ledChannel4, 0); //button
+    }
 
     micros(); //update overflow
     loop();
@@ -246,9 +333,9 @@ void APtask( void * parameter )
 {
   //Initialize Webserver
   server.on("/", handleRoot);
-  server.on("/img", handleImg);
   server.on("/setPWM/setLED", handlePWM); //Reads ADC function is called from out index.html /setPWM/?
   server.on("/buttonSet", handleButton);
+  server.on("/LEDtoggl", handleRainbow);
   server.on("/data", getData);
 
   server.onNotFound(handleWebRequests); //Set setver all paths are not found so we can handle as per URI
@@ -275,8 +362,58 @@ void APtask( void * parameter )
   Serial.print("IP address: ");
   Serial.println(apIP);
 
+  ledcSetup(ledChannel1, LEDfreq, resolution); //RED
+  ledcAttachPin(GPIO27, ledChannel1);
+
+  ledcSetup(ledChannel2, LEDfreq, resolution); //GREEN
+  ledcAttachPin(GPIO26, ledChannel2);
+
+  ledcSetup(ledChannel3, LEDfreq, resolution); //BLUE
+  ledcAttachPin(GPIO25, ledChannel3);
+
   for (;;) {
+
     dnsServer.processNextRequest();
     server.handleClient();
+
+    if (LEDtoggl) {
+
+      if (colorWheelCounter >= 25) {
+        colorWheel();
+        colorWheelCounter = 0;
+      }
+
+      colorWheelCounter++;
+    }
+
+    else if (!LEDtoggl) {
+
+      ledcWrite(ledChannel1, globalR);
+      ledcWrite(ledChannel2, globalG);
+      ledcWrite(ledChannel3, globalB);
+
+      Serial.print("globalR: "); Serial.println(globalR);
+      Serial.print("globalG: "); Serial.println(globalG);
+      Serial.print("globalB: "); Serial.println(globalB);
+
+    }
   }
+}
+
+void fireCannon() {
+
+  status = "-- IN USE, PLEASE WAIT... --";
+
+  digitalWrite(22, LOW);
+  delay(4000);
+  digitalWrite(22, HIGH);
+  delay(4000);
+  digitalWrite(23, LOW);
+  delay(1000);
+  digitalWrite(23, HIGH);
+  delay(500);
+
+  radyCounter = 0;
+  btn = 0;
+
 }
